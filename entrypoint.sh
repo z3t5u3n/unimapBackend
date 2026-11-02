@@ -14,6 +14,15 @@ mkdir -p /var/www/html/storage/framework/{cache,sessions,views} /var/www/html/st
 chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
+# Asegurar que .env exista para comandos de Artisan
+if [ ! -f /var/www/html/.env ]; then
+    if [ -f /var/www/html/.env.example ]; then
+        cp /var/www/html/.env.example /var/www/html/.env
+    else
+        touch /var/www/html/.env
+    fi
+fi
+
 # Generar APP_KEY si no está configurada
 if [ -z "$APP_KEY" ]; then
     echo "=> Generando APP_KEY para Laravel..."
