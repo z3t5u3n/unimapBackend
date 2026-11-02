@@ -512,6 +512,38 @@
                 </tbody>
             </table>
         @endif
+
+        @if(isset($registros_testers) && count($registros_testers) > 0)
+            <div class="section-header">Directorio de Testers Registrados (Entorno de Pruebas)</div>
+            <table class="meter-table" cellpadding="0" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th width="8%">ID</th>
+                        <th width="24%">Usuario / Alias</th>
+                        <th width="26%">Nombre del Tester</th>
+                        <th width="22%">Dispositivo / Notas</th>
+                        <th width="10%">Estado</th>
+                        <th width="10%">Último Acceso</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($registros_testers as $t)
+                        <tr>
+                            <td>#{{ $t->id_tester }}</td>
+                            <td><strong>{{ $t->username }}</strong></td>
+                            <td>{{ $t->nombre }}</td>
+                            <td>{{ $t->dispositivo ?? 'Dispositivo Web' }}</td>
+                            <td>
+                                <span style="font-weight: bold; color: {{ $t->activo ? '#16a34a' : '#dc2626' }};">
+                                    {{ $t->activo ? 'ACTIVO' : 'INACTIVO' }}
+                                </span>
+                            </td>
+                            <td>{{ $t->ultimo_acceso ? $t->ultimo_acceso->format('d/m/Y H:i') : 'Sin ingreso' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
     @endif
 
 </body>

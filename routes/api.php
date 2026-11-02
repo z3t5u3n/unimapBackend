@@ -5,6 +5,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\DocumentoContrller;
 use App\Http\Controllers\UsuarioGeneralController;
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\TesterController;
 
 Route::get('/user', function (Request $request) {
     return $request->user();
@@ -44,4 +45,12 @@ Route::post('/encuestas/responder', [UsuarioGeneralController::class, 'responder
 Route::get('/admin/encuestas/dashboard', [AdminController::class, 'obtenerEncuestasDashboard']);
 Route::post('/admin/encuestas', [AdminController::class, 'crearEncuesta']);
 Route::patch('/admin/encuestas/{id}/toggle', [AdminController::class, 'toggleEncuesta']);
+
+// Testers y Entorno de Pruebas Aislado
+Route::post('/tester/login', [TesterController::class, 'login']);
+Route::get('/admin/testers', [TesterController::class, 'listar']);
+Route::post('/admin/testers', [TesterController::class, 'crear']);
+Route::patch('/admin/testers/{id}/toggle', [TesterController::class, 'toggleEstado']);
+Route::delete('/admin/testers/{id}', [TesterController::class, 'eliminar']);
+
 

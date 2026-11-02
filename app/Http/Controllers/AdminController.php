@@ -18,6 +18,7 @@ use App\Models\AdminAuditoria;
 use App\Models\Notificacion;
 use App\Models\Encuesta;
 use App\Models\RespuestaEncuesta;
+use App\Models\Tester;
 
 class AdminController extends Controller
 {
@@ -467,6 +468,9 @@ class AdminController extends Controller
             'comentarios' => $ultimosComentarios,
         ];
 
+        // G. Testers registrados para el entorno de pruebas
+        $testers = Tester::orderBy('id_tester', 'desc')->get();
+
         return response()->json([
             'usuarios' => $usuarios,
             'sesiones' => $sesiones,
@@ -480,6 +484,7 @@ class AdminController extends Controller
             'notificaciones' => $notificaciones,
             'encuestas' => $encuestas,
             'encuestas_stats' => $encuestasStats,
+            'testers' => $testers,
             'metricas' => [
                 'total_usuarios' => $usuarios->count(),
                 'total_sesiones' => InicioSesion::count(),
@@ -494,6 +499,8 @@ class AdminController extends Controller
                 'total_notificaciones_activas' => $notificaciones->where('activo', true)->count(),
                 'total_encuestas_respuestas' => $totalRespuestasEncuestas,
                 'satisfaccion_promedio' => $promedioGeneral,
+                'total_testers' => $testers->count(),
+                'testers_activos' => $testers->where('activo', true)->count(),
                 'mes_top' => $mesTop,
                 'dia_top' => $diaTop,
                 'bloque_top' => $bloqueTop,
@@ -855,6 +862,27 @@ class AdminController extends Controller
                     'registros_admin_sesiones' => $adminSesiones,
                 ]);
                 $fileName = 'Reporte_Sesiones_Admin_UniMap_' . $timestamp . '.pdf';
+                break;
+
+            case 'testers':
+                $testers = Tester::orderBy('id_tester', 'desc')->get();
+                $totalTesters = $testers->count();
+                $activos = $testers->where('activo', true)->count();
+                $inactivos = $totalTesters - $activos;
+                $conAcceso = $testers->whereNotNull('ultimo_acceso')->count();
+
+                $data = array_merge($data, [
+                    'titulo_seccion' => 'INFORME DE TESTERS Y ENTORNO DE PRUEBAS',
+                    'descripcion_seccion' => 'Control de cuentas de prueba, validadores técnicos de calibración GPS y pruebas en WebGL.',
+                    'kpis' => [
+                        ['label' => 'Total Testers', 'valor' => $totalTesters, 'color' => '#0f172a'],
+                        ['label' => 'Testers Activos', 'valor' => $activos, 'color' => '#10b981'],
+                        ['label' => 'Testers Inactivos', 'valor' => $inactivos, 'color' => '#64748b'],
+                        ['label' => 'Con Acceso Registrado', 'valor' => $conAcceso, 'color' => '#2563eb'],
+                    ],
+                    'registros_testers' => $testers,
+                ]);
+                $fileName = 'Reporte_Testers_UniMap_' . $timestamp . '.pdf';
                 break;
 
             default: // General
