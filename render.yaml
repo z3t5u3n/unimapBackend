@@ -1,0 +1,43 @@
+# Especificación de Infraestructura Render Blueprint para Backend y PostgreSQL
+# https://render.com/docs/blueprint-spec
+
+databases:
+  # 1. Base de datos PostgreSQL gestionada en Render (Capa gratuita)
+  - name: unimap-postgres
+    databaseName: unimap_db
+    user: unimap_user
+    plan: free
+
+services:
+  # 2. Servicio Web de Laravel (Docker)
+  - type: web
+    name: unimap-backend
+    runtime: docker
+    plan: free
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /up
+    envVars:
+      - key: APP_NAME
+        value: UniMapBackend
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: "false"
+      - key: APP_KEY
+        generateValue: true
+      - key: APP_URL
+        fromService:
+          type: web
+          name: unimap-backend
+          property: host
+      - key: DB_CONNECTION
+        value: pgsql
+      - key: DATABASE_URL
+        fromDatabase:
+          name: unimap-postgres
+          property: connectionString
+      - key: DB_SSLMODE
+        value: require
+      - key: LOG_CHANNEL
+        value: stderr
