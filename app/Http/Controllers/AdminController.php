@@ -1164,17 +1164,33 @@ class AdminController extends Controller
                 ]
             );
 
+            $datos = [
+                'mostrarBotonMapa' => (bool)$config->mostrar_mapa_3d,
+                'mostrarBotonGPS' => (bool)$config->mostrar_mapa_gps,
+                'mostrarBotonRecorridos' => (bool)$config->mostrar_recorridos,
+                'updated_at' => $config->updated_at,
+            ];
+
             return response()->json([
+                'success' => true,
+                'configuracion' => $datos,
+                'config' => $datos,
                 'mostrarBotonMapa' => (bool)$config->mostrar_mapa_3d,
                 'mostrarBotonGPS' => (bool)$config->mostrar_mapa_gps,
                 'mostrarBotonRecorridos' => (bool)$config->mostrar_recorridos,
                 'updated_at' => $config->updated_at,
             ], 200);
         } catch (\Exception $e) {
-            return response()->json([
+            $default = [
                 'mostrarBotonMapa' => true,
                 'mostrarBotonGPS' => true,
                 'mostrarBotonRecorridos' => true,
+            ];
+            return response()->json([
+                'success' => false,
+                'configuracion' => $default,
+                'config' => $default,
+                ...$default,
                 'error' => $e->getMessage(),
             ], 200);
         }
@@ -1186,9 +1202,17 @@ class AdminController extends Controller
     public function guardarConfiguracionModulos(Request $request): JsonResponse
     {
         try {
-            $mostrarMapa = $request->boolean('mostrarBotonMapa', true);
-            $mostrarGPS = $request->boolean('mostrarBotonGPS', true);
-            $mostrarRecorridos = $request->boolean('mostrarBotonRecorridos', true);
+            $mostrarMapa = $request->has('mostrarBotonMapa')
+                ? $request->boolean('mostrarBotonMapa')
+                : ($request->has('mostrar_mapa_3d') ? $request->boolean('mostrar_mapa_3d') : $request->boolean('mostrar_mapa', true));
+
+            $mostrarGPS = $request->has('mostrarBotonGPS')
+                ? $request->boolean('mostrarBotonGPS')
+                : $request->boolean('mostrar_mapa_gps', true);
+
+            $mostrarRecorridos = $request->has('mostrarBotonRecorridos')
+                ? $request->boolean('mostrarBotonRecorridos')
+                : $request->boolean('mostrar_recorridos', true);
 
             $config = ConfiguracionModulo::updateOrCreate(
                 ['clave' => 'modulos_usuario'],
@@ -1199,27 +1223,41 @@ class AdminController extends Controller
                 ]
             );
 
-            // Registrar auditoría administrativa
-            AdminAuditoria::create([
-                'id_admin' => $request->input('id_admin', 1),
-                'username' => $request->input('username', 'Admin'),
-                'accion' => 'ACTUALIZAR_CONFIG_MODULOS',
-                'modulo' => 'VISIBILIDAD_INTERFAZ',
-                'detalles' => json_encode([
-                    'mostrar_mapa_3d' => $mostrarMapa,
-                    'mostrar_mapa_gps' => $mostrarGPS,
-                    'mostrar_recorridos' => $mostrarRecorridos,
-                ]),
-                'ip_origen' => $request->ip(),
-            ]);
+            // Registrar auditoría de forma segura (sin fallar si faltan datos de admin)
+            try {
+                $idAdmin = $request->input('id_admin');
+                $adminUser = $request->input('username', 'Admin');
+
+                AdminAuditoria::create([
+                    'id_admin' => is_numeric($idAdmin) ? (int)$idAdmin : null,
+                    'admin_username' => $adminUser,
+                    'tipo_accion' => 'ACTUALIZAR_CONFIG_MODULOS',
+                    'modulo' => 'VISIBILIDAD_INTERFAZ',
+                    'descripcion' => "Actualización de módulos: Mapa 3D=" . ($mostrarMapa ? 'Visible' : 'Oculto') . ", GPS=" . ($mostrarGPS ? 'Visible' : 'Oculto') . ", Recorridos=" . ($mostrarRecorridos ? 'Visible' : 'Oculto'),
+                    'detalles_json' => [
+                        'mostrar_mapa_3d' => $mostrarMapa,
+                        'mostrar_mapa_gps' => $mostrarGPS,
+                        'mostrar_recorridos' => $mostrarRecorridos,
+                    ],
+                    'ip_origen' => $request->ip(),
+                ]);
+            } catch (\Exception $eAudit) {
+                // Silencioso para asegurar que la configuración siempre se guarde
+            }
+
+            $datos = [
+                'mostrarBotonMapa' => (bool)$config->mostrar_mapa_3d,
+                'mostrarBotonGPS' => (bool)$config->mostrar_mapa_gps,
+                'mostrarBotonRecorridos' => (bool)$config->mostrar_recorridos,
+            ];
 
             return response()->json([
                 'message' => 'Configuración de visibilidad de módulos guardada exitosamente.',
-                'config' => [
-                    'mostrarBotonMapa' => (bool)$config->mostrar_mapa_3d,
-                    'mostrarBotonGPS' => (bool)$config->mostrar_mapa_gps,
-                    'mostrarBotonRecorridos' => (bool)$config->mostrar_recorridos,
-                ],
+                'configuracion' => $datos,
+                'config' => $datos,
+                'mostrarBotonMapa' => (bool)$config->mostrar_mapa_3d,
+                'mostrarBotonGPS' => (bool)$config->mostrar_mapa_gps,
+                'mostrarBotonRecorridos' => (bool)$config->mostrar_recorridos,
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -1237,13 +1275,23 @@ class AdminController extends Controller
             $tiempo = floatval($request->input('tiempo_carga_segundos', 0));
             $nombreUsuario = $request->input('nombre_usuario', 'Usuario Anónimo');
             $idUsuario = $request->input('id_usuario');
+            if (empty($idUsuario)) {
+                $idUsuario = null;
+            } else {
+                $idUsuario = (string)$idUsuario;
+            }
+
             $tipoConexion = $request->input('tipo_conexion', 'Desconocido');
             $operador = $request->input('operador');
             $modeloDispositivo = $request->input('modelo_dispositivo', 'Dispositivo Móvil / Web');
-            $ip = $request->ip();
-            $userAgent = $request->userAgent();
+            
+            // Detectar IP real del cliente detrás de proxies de Render
+            $ip = $request->header('X-Forwarded-For') 
+                ? trim(explode(',', $request->header('X-Forwarded-For'))[0]) 
+                : ($request->ip() ?: '127.0.0.1');
+            $userAgent = $request->userAgent() ?: 'Navegador Web';
 
-            // Si el operador no fue detectado por el cliente, intentar resolver por IP
+            // Si el operador no fue detectado por el cliente, resolver por IP
             if (empty($operador) || strtolower($operador) === 'desconocido' || strtolower($operador) === 'unknown') {
                 $operador = $this->resolverOperadorPorIP($ip, $tipoConexion);
             }
@@ -1273,8 +1321,9 @@ class AdminController extends Controller
     /**
      * Resuelve de forma inteligente el operador móvil o ISP colombiano según la IP
      */
-    private function resolverOperadorPorIP(string $ip, string $tipoConexion): string
+    private function resolverOperadorPorIP(?string $ip, string $tipoConexion): string
     {
+        $ip = $ip ?: '127.0.0.1';
         // En conexiones locales
         if (in_array($ip, ['127.0.0.1', '::1']) || str_starts_with($ip, '192.168.') || str_starts_with($ip, '10.')) {
             return str_contains(strtolower($tipoConexion), 'datos') ? 'Tigo / Datos Móviles' : 'Red Local / WiFi';

@@ -38,7 +38,7 @@ return new class extends Migration
         if (!Schema::hasTable('tb_telemetria_cargas_unity')) {
             Schema::create('tb_telemetria_cargas_unity', function (Blueprint $table) {
                 $table->id('id_telemetria');
-                $table->unsignedBigInteger('id_usuario')->nullable();
+                $table->string('id_usuario', 100)->nullable();
                 $table->string('nombre_usuario', 150)->nullable();
                 $table->decimal('tiempo_carga_segundos', 6, 2);
                 $table->string('tipo_conexion', 100)->nullable(); // WiFi, Datos Móviles (4G), etc.
