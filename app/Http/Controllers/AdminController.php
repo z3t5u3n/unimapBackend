@@ -19,6 +19,9 @@ use App\Models\Notificacion;
 use App\Models\Encuesta;
 use App\Models\RespuestaEncuesta;
 use App\Models\Tester;
+use App\Models\ConfiguracionModulo;
+use App\Models\TelemetriaCargaUnity;
+use Illuminate\Support\Facades\Http;
 
 class AdminController extends Controller
 {
@@ -1144,5 +1147,217 @@ class AdminController extends Controller
             ],
             'comentarios' => $ultimosComentarios,
         ], 200);
+    }
+
+    /**
+     * Obtener configuración actual de visibilidad de módulos para usuarios finales
+     */
+    public function obtenerConfiguracionModulos(): JsonResponse
+    {
+        try {
+            $config = ConfiguracionModulo::firstOrCreate(
+                ['clave' => 'modulos_usuario'],
+                [
+                    'mostrar_mapa_3d' => true,
+                    'mostrar_mapa_gps' => true,
+                    'mostrar_recorridos' => true,
+                ]
+            );
+
+            return response()->json([
+                'mostrarBotonMapa' => (bool)$config->mostrar_mapa_3d,
+                'mostrarBotonGPS' => (bool)$config->mostrar_mapa_gps,
+                'mostrarBotonRecorridos' => (bool)$config->mostrar_recorridos,
+                'updated_at' => $config->updated_at,
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'mostrarBotonMapa' => true,
+                'mostrarBotonGPS' => true,
+                'mostrarBotonRecorridos' => true,
+                'error' => $e->getMessage(),
+            ], 200);
+        }
+    }
+
+    /**
+     * Guardar configuración global de visibilidad de módulos (administrado)
+     */
+    public function guardarConfiguracionModulos(Request $request): JsonResponse
+    {
+        try {
+            $mostrarMapa = $request->boolean('mostrarBotonMapa', true);
+            $mostrarGPS = $request->boolean('mostrarBotonGPS', true);
+            $mostrarRecorridos = $request->boolean('mostrarBotonRecorridos', true);
+
+            $config = ConfiguracionModulo::updateOrCreate(
+                ['clave' => 'modulos_usuario'],
+                [
+                    'mostrar_mapa_3d' => $mostrarMapa,
+                    'mostrar_mapa_gps' => $mostrarGPS,
+                    'mostrar_recorridos' => $mostrarRecorridos,
+                ]
+            );
+
+            // Registrar auditoría administrativa
+            AdminAuditoria::create([
+                'id_admin' => $request->input('id_admin', 1),
+                'username' => $request->input('username', 'Admin'),
+                'accion' => 'ACTUALIZAR_CONFIG_MODULOS',
+                'modulo' => 'VISIBILIDAD_INTERFAZ',
+                'detalles' => json_encode([
+                    'mostrar_mapa_3d' => $mostrarMapa,
+                    'mostrar_mapa_gps' => $mostrarGPS,
+                    'mostrar_recorridos' => $mostrarRecorridos,
+                ]),
+                'ip_origen' => $request->ip(),
+            ]);
+
+            return response()->json([
+                'message' => 'Configuración de visibilidad de módulos guardada exitosamente.',
+                'config' => [
+                    'mostrarBotonMapa' => (bool)$config->mostrar_mapa_3d,
+                    'mostrarBotonGPS' => (bool)$config->mostrar_mapa_gps,
+                    'mostrarBotonRecorridos' => (bool)$config->mostrar_recorridos,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error al guardar la configuración: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Registrar telemetría de carga de Unity WebGL
+     */
+    public function registrarCargaUnity(Request $request): JsonResponse
+    {
+        try {
+            $tiempo = floatval($request->input('tiempo_carga_segundos', 0));
+            $nombreUsuario = $request->input('nombre_usuario', 'Usuario Anónimo');
+            $idUsuario = $request->input('id_usuario');
+            $tipoConexion = $request->input('tipo_conexion', 'Desconocido');
+            $operador = $request->input('operador');
+            $modeloDispositivo = $request->input('modelo_dispositivo', 'Dispositivo Móvil / Web');
+            $ip = $request->ip();
+            $userAgent = $request->userAgent();
+
+            // Si el operador no fue detectado por el cliente, intentar resolver por IP
+            if (empty($operador) || strtolower($operador) === 'desconocido' || strtolower($operador) === 'unknown') {
+                $operador = $this->resolverOperadorPorIP($ip, $tipoConexion);
+            }
+
+            $telemetria = TelemetriaCargaUnity::create([
+                'id_usuario' => $idUsuario,
+                'nombre_usuario' => $nombreUsuario,
+                'tiempo_carga_segundos' => $tiempo,
+                'tipo_conexion' => $tipoConexion,
+                'operador' => $operador,
+                'modelo_dispositivo' => $modeloDispositivo,
+                'ip_origen' => $ip,
+                'user_agent' => $userAgent,
+            ]);
+
+            return response()->json([
+                'message' => 'Telemetría de carga registrada exitosamente.',
+                'telemetria' => $telemetria,
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error al registrar telemetría: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * Resuelve de forma inteligente el operador móvil o ISP colombiano según la IP
+     */
+    private function resolverOperadorPorIP(string $ip, string $tipoConexion): string
+    {
+        // En conexiones locales
+        if (in_array($ip, ['127.0.0.1', '::1']) || str_starts_with($ip, '192.168.') || str_starts_with($ip, '10.')) {
+            return str_contains(strtolower($tipoConexion), 'datos') ? 'Tigo / Datos Móviles' : 'Red Local / WiFi';
+        }
+
+        try {
+            // Consulta rápida a ip-api.com con timeout corto (1.2 segundos) para no demorar la respuesta
+            $resp = Http::timeout(1.2)->get("http://ip-api.com/json/{$ip}?fields=isp,org,as,mobile");
+            if ($resp->successful()) {
+                $data = $resp->json();
+                $isp = strtolower(($data['isp'] ?? '') . ' ' . ($data['org'] ?? '') . ' ' . ($data['as'] ?? ''));
+
+                if (str_contains($isp, 'colombia movil') || str_contains($isp, 'tigo') || str_contains($isp, 'millicom')) {
+                    return 'Tigo';
+                } elseif (str_contains($isp, 'comcel') || str_contains($isp, 'claro') || str_contains($isp, 'telmex')) {
+                    return 'Claro';
+                } elseif (str_contains($isp, 'telefónica') || str_contains($isp, 'telefonica') || str_contains($isp, 'movistar') || str_contains($isp, 'colombia telecomunicaciones')) {
+                    return 'Movistar';
+                } elseif (str_contains($isp, 'wom') || str_contains($isp, 'partners telecom')) {
+                    return 'WOM';
+                } elseif (str_contains($isp, 'etb')) {
+                    return 'ETB';
+                } elseif (!empty($data['isp'])) {
+                    return $data['isp'];
+                }
+            }
+        } catch (\Exception $e) {
+            // Silencioso en caso de timeout
+        }
+
+        return str_contains(strtolower($tipoConexion), 'datos') ? 'Datos Móviles (SIM)' : 'WiFi';
+    }
+
+    /**
+     * Obtener estadísticas completas de telemetría y rendimiento de carga de Unity
+     */
+    public function obtenerTelemetriaDashboard(Request $request): JsonResponse
+    {
+        try {
+            $query = TelemetriaCargaUnity::orderBy('id_telemetria', 'desc');
+
+            $registros = $query->limit(200)->get();
+            $totalRegistros = TelemetriaCargaUnity::count();
+
+            // Peor tiempo de carga (Mayor / Más lento)
+            $peorCarga = TelemetriaCargaUnity::orderBy('tiempo_carga_segundos', 'desc')->first();
+
+            // Mejor tiempo de carga (Menor / Más rápido)
+            $mejorCarga = TelemetriaCargaUnity::where('tiempo_carga_segundos', '>', 0.2)
+                ->orderBy('tiempo_carga_segundos', 'asc')
+                ->first();
+
+            // Promedio General
+            $promedioGeneral = $totalRegistros > 0 ? round(TelemetriaCargaUnity::avg('tiempo_carga_segundos'), 2) : 0;
+
+            // Promedios por Tipo de Conexión
+            $promediosConexion = TelemetriaCargaUnity::select('tipo_conexion', DB::raw('ROUND(AVG(tiempo_carga_segundos), 2) as promedio_segundos'), DB::raw('COUNT(*) as total'))
+                ->whereNotNull('tipo_conexion')
+                ->groupBy('tipo_conexion')
+                ->get();
+
+            // Promedios por Operador
+            $promediosOperador = TelemetriaCargaUnity::select('operador', DB::raw('ROUND(AVG(tiempo_carga_segundos), 2) as promedio_segundos'), DB::raw('COUNT(*) as total'))
+                ->whereNotNull('operador')
+                ->groupBy('operador')
+                ->orderBy('total', 'desc')
+                ->get();
+
+            return response()->json([
+                'registros' => $registros,
+                'estadisticas' => [
+                    'total_cargas' => $totalRegistros,
+                    'promedio_general' => $promedioGeneral,
+                    'peor_carga' => $peorCarga,
+                    'mejor_carga' => $mejorCarga,
+                    'promedios_conexion' => $promediosConexion,
+                    'promedios_operador' => $promediosOperador,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'message' => 'Error al obtener telemetría: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }

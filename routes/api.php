@@ -53,4 +53,13 @@ Route::post('/admin/testers', [TesterController::class, 'crear']);
 Route::patch('/admin/testers/{id}/toggle', [TesterController::class, 'toggleEstado']);
 Route::delete('/admin/testers/{id}', [TesterController::class, 'eliminar']);
 
+// Configuración de Visibilidad de Módulos (Persistente Global)
+Route::get('/configuracion/modulos', [AdminController::class, 'obtenerConfiguracionModulos']);
+Route::post('/admin/configuracion/modulos', [AdminController::class, 'guardarConfiguracionModulos']);
+
+// Telemetría y Rendimiento de Carga de Unity WebGL
+Route::post('/telemetria/carga-unity', [AdminController::class, 'registrarCargaUnity']);
+Route::get('/admin/telemetria/dashboard', [AdminController::class, 'obtenerTelemetriaDashboard']);
+
+
 
