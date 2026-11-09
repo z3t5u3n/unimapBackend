@@ -382,8 +382,8 @@ class UsuarioGeneralController extends Controller
             'fecha_creacion' => now(),
         ]);
 
-        // Construir enlace de verificación hacia el frontend
-        $urlFrontend = 'http://localhost:3000';
+        // Construir enlace de verificación hacia el frontend en producción
+        $urlFrontend = env('FRONTEND_URL', 'https://unimap.zetsuen33.workers.dev');
         $enlaceVerificacion = "{$urlFrontend}/VerificarRol?token={$token}";
 
         $carreraObj = Carrera::find($validated['id_carrera']);
@@ -462,11 +462,12 @@ class UsuarioGeneralController extends Controller
     // Método para confirmar y aplicar el cambio de rol con token de 5 minutos
     public function verificarCambioRol(Request $request)
     {
+        $urlFrontend = env('FRONTEND_URL', 'https://unimap.zetsuen33.workers.dev');
         $token = $request->input('token') ?? $request->query('token');
 
         if (!$token) {
             if ($request->isMethod('get') && !$request->wantsJson()) {
-                return redirect("http://localhost:3000/VerificarRol?error=token_invalido");
+                return redirect("{$urlFrontend}/VerificarRol?error=token_invalido");
             }
             return response()->json([
                 'mensaje' => 'Token de verificación no proporcionado.',
@@ -477,7 +478,7 @@ class UsuarioGeneralController extends Controller
 
         if (!$verificacion) {
             if ($request->isMethod('get') && !$request->wantsJson()) {
-                return redirect("http://localhost:3000/VerificarRol?error=token_invalido");
+                return redirect("{$urlFrontend}/VerificarRol?error=token_invalido");
             }
             return response()->json([
                 'mensaje' => 'El enlace de verificación no es válido.',
@@ -486,7 +487,7 @@ class UsuarioGeneralController extends Controller
 
         if ($verificacion->utilizado) {
             if ($request->isMethod('get') && !$request->wantsJson()) {
-                return redirect("http://localhost:3000/VerificarRol?error=token_utilizado");
+                return redirect("{$urlFrontend}/VerificarRol?error=token_utilizado");
             }
             return response()->json([
                 'mensaje' => 'Este enlace de verificación ya ha sido utilizado anteriormente.',
@@ -496,7 +497,7 @@ class UsuarioGeneralController extends Controller
         // Validar expiración de 5 minutos
         if (now()->gt($verificacion->expira_en)) {
             if ($request->isMethod('get') && !$request->wantsJson()) {
-                return redirect("http://localhost:3000/VerificarRol?error=token_expirado");
+                return redirect("{$urlFrontend}/VerificarRol?error=token_expirado");
             }
             return response()->json([
                 'mensaje' => 'El enlace de verificación ha expirado. El tiempo máximo permitido es de 5 minutos. Por favor solicita uno nuevo desde tu perfil.',
@@ -536,7 +537,7 @@ class UsuarioGeneralController extends Controller
         $verificacion->save();
 
         if ($request->isMethod('get') && !$request->wantsJson()) {
-            return redirect("http://localhost:3000/VerificarRol?token={$token}&exito=1");
+            return redirect("{$urlFrontend}/VerificarRol?token={$token}&exito=1");
         }
 
         return response()->json([
