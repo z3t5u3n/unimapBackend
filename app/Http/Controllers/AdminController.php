@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Cache;
 use Barryvdh\DomPDF\Facade\Pdf;
 use App\Models\UsuarioGeneral;
 use App\Models\InicioSesion;
@@ -175,6 +176,8 @@ class AdminController extends Controller
             'fecha_accion' => now(),
         ]);
 
+        Cache::forget('admin_dashboard_cache');
+
         return response()->json([
             'message' => 'Administrador registrado exitosamente.',
             'admin' => [
@@ -191,8 +194,9 @@ class AdminController extends Controller
      */
     public function dashboard(): JsonResponse
     {
-        // 1. Usuarios con sus tipos, documentos asociados y datos de estudiante
-        $usuarios = UsuarioGeneral::leftJoin('tb_documentos', 'tb_usuario_general.tipo_documento', '=', 'tb_documentos.id_documento')
+        $payload = Cache::remember('admin_dashboard_cache', 35, function () {
+            // 1. Usuarios con sus tipos, documentos asociados y datos de estudiante
+            $usuarios = UsuarioGeneral::leftJoin('tb_documentos', 'tb_usuario_general.tipo_documento', '=', 'tb_documentos.id_documento')
             ->leftJoin('tb_tipo_usuario', 'tb_usuario_general.tipo_usuario', '=', 'tb_tipo_usuario.id_tipo')
             ->leftJoin('tb_estudiante', 'tb_usuario_general.id_usuario', '=', 'tb_estudiante.id_usuario')
             ->leftJoin('tb_carreras', 'tb_estudiante.id_carrera', '=', 'tb_carreras.id_carrera')
@@ -430,17 +434,31 @@ class AdminController extends Controller
 
         // F. Encuestas y métricas de satisfacción
         $encuestas = Encuesta::withCount('respuestas')->orderBy('id_encuesta', 'desc')->get();
-        $totalRespuestasEncuestas = RespuestaEncuesta::count();
-        $promedioGeneral = $totalRespuestasEncuestas > 0 ? round(RespuestaEncuesta::avg('calificacion_general'), 2) : 0;
-        $promedioFacilidad = $totalRespuestasEncuestas > 0 ? round(RespuestaEncuesta::avg('facilidad_uso'), 2) : 0;
-        $promedioMapa3D = $totalRespuestasEncuestas > 0 ? round(RespuestaEncuesta::avg('calidad_mapa_3d'), 2) : 0;
+        $statsAgregados = DB::table('tb_respuestas_encuesta')
+            ->selectRaw('
+                COUNT(*) as total,
+                COALESCE(ROUND(AVG(calificacion_general), 2), 0) as prom_gen,
+                COALESCE(ROUND(AVG(facilidad_uso), 2), 0) as prom_fac,
+                COALESCE(ROUND(AVG(calidad_mapa_3d), 2), 0) as prom_mapa,
+                SUM(CASE WHEN calificacion_general = 1 THEN 1 ELSE 0 END) as c1,
+                SUM(CASE WHEN calificacion_general = 2 THEN 1 ELSE 0 END) as c2,
+                SUM(CASE WHEN calificacion_general = 3 THEN 1 ELSE 0 END) as c3,
+                SUM(CASE WHEN calificacion_general = 4 THEN 1 ELSE 0 END) as c4,
+                SUM(CASE WHEN calificacion_general = 5 THEN 1 ELSE 0 END) as c5
+            ')
+            ->first();
+
+        $totalRespuestasEncuestas = (int)($statsAgregados->total ?? 0);
+        $promedioGeneral = (float)($statsAgregados->prom_gen ?? 0);
+        $promedioFacilidad = (float)($statsAgregados->prom_fac ?? 0);
+        $promedioMapa3D = (float)($statsAgregados->prom_mapa ?? 0);
 
         $estrellasCounts = [
-            1 => RespuestaEncuesta::where('calificacion_general', 1)->count(),
-            2 => RespuestaEncuesta::where('calificacion_general', 2)->count(),
-            3 => RespuestaEncuesta::where('calificacion_general', 3)->count(),
-            4 => RespuestaEncuesta::where('calificacion_general', 4)->count(),
-            5 => RespuestaEncuesta::where('calificacion_general', 5)->count(),
+            1 => (int)($statsAgregados->c1 ?? 0),
+            2 => (int)($statsAgregados->c2 ?? 0),
+            3 => (int)($statsAgregados->c3 ?? 0),
+            4 => (int)($statsAgregados->c4 ?? 0),
+            5 => (int)($statsAgregados->c5 ?? 0),
         ];
 
         $ultimosComentarios = RespuestaEncuesta::leftJoin('tb_usuario_general', 'tb_respuestas_encuesta.id_usuario', '=', 'tb_usuario_general.id_usuario')
@@ -474,7 +492,7 @@ class AdminController extends Controller
         // G. Testers registrados para el entorno de pruebas
         $testers = Tester::orderBy('id_tester', 'desc')->get();
 
-        return response()->json([
+        return [
             'usuarios' => $usuarios,
             'sesiones' => $sesiones,
             'recorridos' => $recorridos,
@@ -513,7 +531,10 @@ class AdminController extends Controller
                 'dias_semana' => $estadisticasDias,
                 'bloques' => $estadisticasBloques,
             ],
-        ], 200);
+        ];
+        });
+
+        return response()->json($payload, 200);
     }
 
     /**
@@ -575,6 +596,8 @@ class AdminController extends Controller
             'ip_origen' => $request->ip(),
             'fecha_accion' => now(),
         ]);
+
+        Cache::forget('admin_dashboard_cache');
 
         return response()->json([
             'message' => 'Estado del reporte actualizado exitosamente',
@@ -888,23 +911,110 @@ class AdminController extends Controller
                 $fileName = 'Reporte_Testers_UniMap_' . $timestamp . '.pdf';
                 break;
 
-            default: // General
-                $auditorias = AdminAuditoria::orderBy('fecha_accion', 'desc')->limit(120)->get();
-                $reportes = ReporteMapa::orderBy('fecha_reporte', 'desc')->limit(100)->get();
-                $sesiones = AdminSesion::orderBy('fecha_inicio', 'desc')->limit(40)->get();
+            case 'notificaciones':
+                $notificaciones = Notificacion::orderBy('id_notificacion', 'desc')->get();
+                $totalNotificaciones = $notificaciones->count();
+                $activas = $notificaciones->where('activo', true)->count();
+                $inactivas = $totalNotificaciones - $activas;
+                $avisos = $notificaciones->where('tipo', 'aviso')->count();
+                $mantenimientos = $notificaciones->where('tipo', 'mantenimiento')->count();
+                $urgentes = $notificaciones->where('tipo', 'urgente')->count();
+                $actualizaciones = $notificaciones->where('tipo', 'actualizacion')->count();
+
+                $distribucionTipos = [
+                    ['label' => 'Avisos Generales', 'cantidad' => $avisos, 'porcentaje' => $totalNotificaciones > 0 ? round(($avisos / $totalNotificaciones) * 100, 1) : 0, 'color' => '#2563eb'],
+                    ['label' => 'Mantenimiento Campus', 'cantidad' => $mantenimientos, 'porcentaje' => $totalNotificaciones > 0 ? round(($mantenimientos / $totalNotificaciones) * 100, 1) : 0, 'color' => '#f59e0b'],
+                    ['label' => 'Urgentes / Alertas', 'cantidad' => $urgentes, 'porcentaje' => $totalNotificaciones > 0 ? round(($urgentes / $totalNotificaciones) * 100, 1) : 0, 'color' => '#ef4444'],
+                    ['label' => 'Actualizaciones 3D', 'cantidad' => $actualizaciones, 'porcentaje' => $totalNotificaciones > 0 ? round(($actualizaciones / $totalNotificaciones) * 100, 1) : 0, 'color' => '#10b981'],
+                ];
+
+                $data = array_merge($data, [
+                    'titulo_seccion' => 'INFORME DE NOTIFICACIONES Y COMUNICADOS A USUARIOS',
+                    'descripcion_seccion' => 'Registro y monitoreo de avisos, incidencias de mantenimiento y alertas emitidas a la comunidad de UniMap.',
+                    'kpis' => [
+                        ['label' => 'Total Notificaciones', 'valor' => $totalNotificaciones, 'color' => '#0f172a'],
+                        ['label' => 'Activas en el Mapa', 'valor' => $activas, 'color' => '#10b981'],
+                        ['label' => 'Inactivas / Archivadas', 'valor' => $inactivas, 'color' => '#64748b'],
+                        ['label' => 'Alertas Urgentes', 'valor' => $urgentes, 'color' => '#ef4444'],
+                    ],
+                    'distribucion_tipos' => $distribucionTipos,
+                    'registros_notificaciones' => $notificaciones,
+                ]);
+                $fileName = 'Reporte_Notificaciones_UniMap_' . $timestamp . '.pdf';
+                break;
+
+            case 'encuestas':
+                $encuestas = Encuesta::orderBy('id_encuesta', 'desc')->get();
+                $respuestas = RespuestaEncuesta::orderBy('created_at', 'desc')->get();
+                $totalRespuestas = $respuestas->count();
+                $promedioGeneral = $totalRespuestas > 0 ? round($respuestas->avg('calificacion_general'), 2) : 0;
+                $promedioFacilidad = $totalRespuestas > 0 ? round($respuestas->avg('facilidad_uso'), 2) : 0;
+                $promedioCalidad = $totalRespuestas > 0 ? round($respuestas->avg('calidad_mapa_3d'), 2) : 0;
+
+                $estrellas = [
+                    5 => $respuestas->where('calificacion_general', 5)->count(),
+                    4 => $respuestas->where('calificacion_general', 4)->count(),
+                    3 => $respuestas->where('calificacion_general', 3)->count(),
+                    2 => $respuestas->where('calificacion_general', 2)->count(),
+                    1 => $respuestas->where('calificacion_general', 1)->count(),
+                ];
+
+                $distribucionEstrellas = [];
+                foreach ([5, 4, 3, 2, 1] as $star) {
+                    $cant = $estrellas[$star];
+                    $porc = $totalRespuestas > 0 ? round(($cant / $totalRespuestas) * 100, 1) : 0;
+                    $distribucionEstrellas[] = [
+                        'estrellas' => $star,
+                        'cantidad' => $cant,
+                        'porcentaje' => $porc,
+                    ];
+                }
+
+                $data = array_merge($data, [
+                    'titulo_seccion' => 'INFORME DE ENCUESTAS Y SATISFACCIÓN DE USUARIOS',
+                    'descripcion_seccion' => 'Evaluación integral de la experiencia estudiantil, usabilidad de navegación 3D y comentarios abiertos.',
+                    'kpis' => [
+                        ['label' => 'Total Respuestas', 'valor' => $totalRespuestas, 'color' => '#0f172a'],
+                        ['label' => 'Promedio General', 'valor' => "{$promedioGeneral} / 5 ★", 'color' => '#f59e0b'],
+                        ['label' => 'Facilidad de Uso', 'valor' => "{$promedioFacilidad} / 5 ★", 'color' => '#2563eb'],
+                        ['label' => 'Calidad Mapa 3D', 'valor' => "{$promedioCalidad} / 5 ★", 'color' => '#10b981'],
+                    ],
+                    'distribucion_estrellas' => $distribucionEstrellas,
+                    'promedios_dimensiones' => [
+                        ['label' => 'Satisfacción General', 'promedio' => $promedioGeneral],
+                        ['label' => 'Facilidad de Búsqueda', 'promedio' => $promedioFacilidad],
+                        ['label' => 'Rendimiento y Calidad 3D', 'promedio' => $promedioCalidad],
+                    ],
+                    'comentarios_usuarios' => $respuestas->whereNotNull('comentarios')->take(30),
+                ]);
+                $fileName = 'Reporte_Encuestas_UniMap_' . $timestamp . '.pdf';
+                break;
+
+            default: // General consolidado de todas las 9 secciones
+                $auditorias = AdminAuditoria::orderBy('fecha_accion', 'desc')->limit(60)->get();
+                $reportes = ReporteMapa::orderBy('fecha_reporte', 'desc')->limit(60)->get();
+                $sesiones = AdminSesion::orderBy('fecha_inicio', 'desc')->limit(30)->get();
+                $notificaciones = Notificacion::where('activo', true)->get();
+                $respuestas = RespuestaEncuesta::all();
+                $promGeneral = $respuestas->count() > 0 ? round($respuestas->avg('calificacion_general'), 2) : 0;
 
                 $data = array_merge($data, [
                     'titulo_seccion' => 'INFORME EJECUTIVO GENERAL DEL SISTEMA UNIMAP 3D',
-                    'descripcion_seccion' => 'Resumen global de actividad, usuarios, auditoría, sesiones y soporte técnico del campus 3D.',
+                    'descripcion_seccion' => 'Consolidado global de estadísticas de las 9 secciones: usuarios, sesiones, recorridos, reportes, admins, auditoría, sesiones admin, notificaciones y satisfacción.',
                     'kpis' => [
-                        ['label' => 'Acciones Auditadas', 'valor' => AdminAuditoria::count(), 'color' => '#0f172a'],
+                        ['label' => 'Total Usuarios', 'valor' => UsuarioGeneral::count(), 'color' => '#0f172a'],
+                        ['label' => 'Inicios de Sesión', 'valor' => InicioSesion::count(), 'color' => '#2563eb'],
+                        ['label' => 'Recorridos 3D', 'valor' => LugarRecorrido::count(), 'color' => '#10b981'],
                         ['label' => 'Bugs Resueltos', 'valor' => ReporteMapa::where('estado', 'resuelto')->count(), 'color' => '#15803d'],
-                        ['label' => 'En Revisión', 'valor' => ReporteMapa::where('estado', 'en_revision')->count(), 'color' => '#b45309'],
-                        ['label' => 'Pendientes', 'valor' => ReporteMapa::where('estado', 'pendiente')->count(), 'color' => '#b91c1c'],
+                        ['label' => 'Admins Activos', 'valor' => Admin::count(), 'color' => '#8b5cf6'],
+                        ['label' => 'Acciones Auditadas', 'valor' => AdminAuditoria::count(), 'color' => '#64748b'],
+                        ['label' => 'Avisos Activos', 'valor' => $notificaciones->count(), 'color' => '#38bdf8'],
+                        ['label' => 'Satisfacción ★', 'valor' => "{$promGeneral} / 5", 'color' => '#f59e0b'],
                     ],
                     'auditorias' => $auditorias,
                     'reportes' => $reportes,
                     'sesiones' => $sesiones,
+                    'notificaciones_activas' => $notificaciones,
                 ]);
                 $fileName = 'Reporte_General_UniMap_' . $timestamp . '.pdf';
                 break;
@@ -959,6 +1069,8 @@ class AdminController extends Controller
             'fecha_accion' => now(),
         ]);
 
+        Cache::forget('admin_dashboard_cache');
+
         return response()->json([
             'mensaje' => 'Notificación creada exitosamente.',
             'notificacion' => $notificacion,
@@ -989,6 +1101,8 @@ class AdminController extends Controller
             'fecha_accion' => now(),
         ]);
 
+        Cache::forget('admin_dashboard_cache');
+
         return response()->json([
             'mensaje' => 'Estado de la notificación actualizado.',
             'notificacion' => $notificacion,
@@ -1015,6 +1129,8 @@ class AdminController extends Controller
             'ip_origen' => $request->ip(),
             'fecha_accion' => now(),
         ]);
+
+        Cache::forget('admin_dashboard_cache');
 
         return response()->json(['mensaje' => 'Notificación eliminada correctamente.'], 200);
     }
@@ -1058,6 +1174,8 @@ class AdminController extends Controller
             'fecha_accion' => now(),
         ]);
 
+        Cache::forget('admin_dashboard_cache');
+
         return response()->json([
             'mensaje' => 'Encuesta creada exitosamente.',
             'encuesta' => $encuesta,
@@ -1094,6 +1212,8 @@ class AdminController extends Controller
             'ip_origen' => $request->ip(),
             'fecha_accion' => now(),
         ]);
+
+        Cache::forget('admin_dashboard_cache');
 
         return response()->json([
             'mensaje' => 'Estado de la encuesta actualizado.',

@@ -546,5 +546,158 @@
         @endif
     @endif
 
+    {{-- ============================================================== --}}
+    {{-- SECCIÓN: NOTIFICACIONES (DISTRIBUCIÓN VISUAL Y LISTADO)        --}}
+    {{-- ============================================================== --}}
+    @if($seccion === 'notificaciones')
+        <div class="section-header">Distribución de Comunicados por Categoría</div>
+        @if(isset($distribucion_tipos) && count($distribucion_tipos) > 0)
+            <table class="meter-table" cellpadding="0" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th width="32%">Tipo / Categoría de Aviso</th>
+                        <th width="18%">Comunicados</th>
+                        <th width="15%">Porcentaje</th>
+                        <th width="35%">Proporción Gráfica</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($distribucion_tipos as $tipo)
+                        <tr>
+                            <td><strong>{{ $tipo['label'] }}</strong></td>
+                            <td>{{ $tipo['cantidad'] }} avisos</td>
+                            <td><strong>{{ $tipo['porcentaje'] }}%</strong></td>
+                            <td>
+                                <div class="meter-bar-container">
+                                    <div class="meter-bar-fill" style="width: {{ $tipo['porcentaje'] }}%; background-color: {{ $tipo['color'] ?? '#38bdf8' }};"></div>
+                                </div>
+                            </td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+
+        @if(isset($registros_notificaciones) && count($registros_notificaciones) > 0)
+            <div class="section-header">Historial de Comunicados y Avisos al Usuario</div>
+            <table class="meter-table" cellpadding="0" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th width="6%">ID</th>
+                        <th width="28%">Título del Comunicado</th>
+                        <th width="14%">Categoría</th>
+                        <th width="10%">Estado</th>
+                        <th width="24%">Mensaje Resumen</th>
+                        <th width="18%">Fecha de Publicación</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($registros_notificaciones as $n)
+                        <tr>
+                            <td>#{{ $n->id_notificacion }}</td>
+                            <td><strong>{{ $n->titulo }}</strong></td>
+                            <td><span style="text-transform: capitalize;">{{ $n->tipo }}</span></td>
+                            <td>
+                                <span style="font-weight: bold; color: {{ $n->activo ? '#16a34a' : '#dc2626' }};">
+                                    {{ $n->activo ? 'ACTIVO' : 'INACTIVO' }}
+                                </span>
+                            </td>
+                            <td>{{ \Illuminate\Support\Str::limit($n->mensaje, 60) }}</td>
+                            <td>{{ $n->created_at ? $n->created_at->format('d/m/Y H:i') : 'N/A' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+    @endif
+
+    {{-- ============================================================== --}}
+    {{-- SECCIÓN: ENCUESTAS Y SATISFACCIÓN (DISTRIBUCIÓN VISUAL)        --}}
+    {{-- ============================================================== --}}
+    @if($seccion === 'encuestas')
+        <div class="section-header">Desglose de Calificaciones por Nivel de Estrellas (1 a 5 ★)</div>
+        @if(isset($distribucion_estrellas) && count($distribucion_estrellas) > 0)
+            <table class="meter-table" cellpadding="0" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th width="25%">Valoración</th>
+                        <th width="20%">Respuestas Recibidas</th>
+                        <th width="15%">Porcentaje</th>
+                        <th width="40%">Distribución Porcentual</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($distribucion_estrellas as $est)
+                        <tr>
+                            <td><strong>{{ str_repeat('★', $est['estrellas']) }} ({{ $est['estrellas'] }} estrellas)</strong></td>
+                            <td>{{ $est['cantidad'] }} votos</td>
+                            <td><strong>{{ $est['porcentaje'] }}%</strong></td>
+                            <td>
+                                <div class="meter-bar-container">
+                                    <div class="meter-bar-fill" style="width: {{ $est['porcentaje'] }}%; background-color: #f59e0b;"></div>
+                                </div>
+                            </td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+
+        @if(isset($promedios_dimensiones) && count($promedios_dimensiones) > 0)
+            <div class="section-header">Evaluación por Dimensiones de Usabilidad y Calidad 3D</div>
+            <table class="meter-table" cellpadding="0" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th width="35%">Dimensión Evaluada</th>
+                        <th width="20%">Puntaje Promedio</th>
+                        <th width="15%">Equivalente</th>
+                        <th width="30%">Nivel de Satisfacción</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($promedios_dimensiones as $dim)
+                        @php
+                            $pctScore = round(($dim['promedio'] / 5) * 100, 1);
+                        @endphp
+                        <tr>
+                            <td><strong>{{ $dim['label'] }}</strong></td>
+                            <td><strong>{{ $dim['promedio'] }} / 5.0</strong></td>
+                            <td>{{ $pctScore }}%</td>
+                            <td>
+                                <div class="meter-bar-container">
+                                    <div class="meter-bar-fill" style="width: {{ $pctScore }}%; background-color: #10b981;"></div>
+                                </div>
+                            </td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+
+        @if(isset($comentarios_usuarios) && count($comentarios_usuarios) > 0)
+            <div class="section-header">Sugerencias y Comentarios Abiertos de la Comunidad</div>
+            <table class="meter-table" cellpadding="0" cellspacing="0">
+                <thead>
+                    <tr>
+                        <th width="15%">Usuario</th>
+                        <th width="15%">Calificación</th>
+                        <th width="50%">Comentario / Sugerencia</th>
+                        <th width="20%">Fecha</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($comentarios_usuarios as $c)
+                        <tr>
+                            <td><strong>{{ $c->id_usuario }}</strong></td>
+                            <td style="color: #f59e0b; font-weight: bold;">{{ str_repeat('★', $c->calificacion_general) }} ({{ $c->calificacion_general }}/5)</td>
+                            <td><em>"{{ $c->comentarios }}"</em></td>
+                            <td>{{ $c->created_at ? $c->created_at->format('d/m/Y H:i') : 'N/A' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+    @endif
+
 </body>
 </html>
